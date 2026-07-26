@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "priya-gautam-mcp": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${workspaceFolder}/dist/index.js"]
+    }
+  }
+}

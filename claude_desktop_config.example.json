@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "priya-gautam-mcp": {
+      "command": "node",
+      "args": [
+        "/ABSOLUTE/PATH/TO/MOJO/dist/index.js"
+      ],
+      "env": {}
+    }
+  }
+}
