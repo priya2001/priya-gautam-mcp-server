@@ -238,32 +238,59 @@ export async function runStdio(): Promise<void> {
 
 export async function runHttp(port = Number(process.env.PORT ?? '3000'), host = process.env.HOST ?? '0.0.0.0'): Promise<void> {
   const server = buildServer();
+  console.log("HTTP Server Starting...");
   const transport = new NodeStreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID()
   });
 
   await server.connect(transport);
+  console.log("MCP Transport Connected");
 
-  const httpServer = createServer((req, res) => {
-    if (req.url === '/health') {
-      res.statusCode = 200;
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ ok: true, transport: 'http' }));
-      return;
-    }
+const httpServer = createServer((req, res) => {
 
-    if (req.url?.startsWith('/mcp')) {
-      void transport.handleRequest(req, res);
-      return;
-    }
-
-    res.statusCode = 404;
+  if (req.url === '/health') {
+    res.statusCode = 200;
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ error: 'Not found' }));
-  });
+    res.end(JSON.stringify({ ok: true, transport: 'http' }));
+    return;
+  }
+
+  // CORS Preflight
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept, Mcp-Session-Id',
+      'Access-Control-Max-Age': '86400'
+    });
+    res.end();
+    return;
+  }
+
+  if (req.url?.startsWith('/mcp')) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+
+    console.log("================================");
+    console.log("Incoming MCP Request");
+    console.log("Method:", req.method);
+    console.log("Headers:", req.headers);
+    console.log("================================");
+
+    void transport.handleRequest(req, res);
+    return;
+  }
+
+  res.statusCode = 404;
+  res.setHeader('content-type', 'application/json');
+  res.end(JSON.stringify({ error: 'Not found' }));
+});
 
   await new Promise<void>(resolve => {
-    httpServer.listen(port, host, () => resolve());
+   httpServer.listen(port, host, () => {
+  console.log(`Listening on ${host}:${port}`);
+  resolve();
+});
   });
 
   process.on('SIGINT', () => {
