@@ -2,6 +2,22 @@
 
 An MCP (Model Context Protocol) server that exposes Priya Gautam's professional profile through tools, resources, prompts, and Dynamic Context Retrieval (DCR).
 
+## Screenshots
+
+### Profile
+
+![MCP profile](screenshot/mcp-profile.png)
+
+### Education
+
+![MCP education](screenshot/mcp-education.png)
+
+### About Priya
+
+![About Priya](screenshot/about-priya.png)
+
+![About Priya 2](screenshot/about-priya2.png)
+
 ## Source vs compiled code
 
 - `src/*.ts` = editable TypeScript source code.
