@@ -3,8 +3,9 @@
     "priya-gautam-mcp": {
       "command": "node",
       "args": [
-        "/ABSOLUTE/PATH/TO/MOJO/dist/index.js"
+        "/Users/priyagautam/Downloads/MOJO/dist/index.js"
       ],
+      "cwd": "/Users/priyagautam/Downloads/MOJO",
       "env": {}
     }
   }

@@ -6,7 +6,7 @@ export const assistantProfile = {
         {
             institution: 'Motilal Nehru National Institute of Technology, Allahabad',
             degree: 'Master of Computer Applications (MCA)',
-            duration: 'Aug 2023 – Aug 2026'
+            duration: 'Aug 2023 – Present'
         }
     ],
     experience: [
