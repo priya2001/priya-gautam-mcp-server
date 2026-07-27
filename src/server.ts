@@ -232,69 +232,158 @@ export function buildServer(): McpServer {
   return server;
 }
 
+const CORS_ALLOW_HEADERS = [
+  'Accept',
+  'Authorization',
+  'Content-Type',
+  'Last-Event-Id',
+  'Last-Event-ID',
+  'Mcp-Protocol-Version',
+  'Mcp-Session-Id'
+].join(', ');
+
 export async function runStdio(): Promise<void> {
   await serveStdio(buildServer);
 }
 
 export async function runHttp(port = Number(process.env.PORT ?? '3000'), host = process.env.HOST ?? '0.0.0.0'): Promise<void> {
-  const server = buildServer();
   console.log("HTTP Server Starting...");
-  const transport = new NodeStreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID()
+
+  // One NodeStreamableHTTPServerTransport instance == one MCP session
+  // (it stores a single `sessionId` internally, not a map of sessions).
+  // Every client connection - Inspector, Claude Desktop, a second browser
+  // tab, a reconnect after a dropped connection - must therefore get its
+  // own transport (and its own McpServer instance connected to it).
+  // Reusing one global transport for every request meant the *first*
+  // client to call `initialize` permanently marked that single transport
+  // as initialized; every subsequent client's `initialize` call then hit
+  // "Invalid Request: Server already initialized", and any request that
+  // carried a different (or missing) Mcp-Session-Id was rejected too.
+  // That is why MCP Inspector could not connect after the very first use.
+  const transports = new Map<string, NodeStreamableHTTPServerTransport>();
+
+  function createSessionTransport(): NodeStreamableHTTPServerTransport {
+    const transport = new NodeStreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: sessionId => {
+        transports.set(sessionId, transport);
+        console.log(`[assistant-profile] session initialized: ${sessionId}`);
+      },
+      onsessionclosed: sessionId => {
+        if (sessionId) {
+          transports.delete(sessionId);
+          console.log(`[assistant-profile] session closed: ${sessionId}`);
+        }
+      }
+    });
+
+    transport.onclose = () => {
+      if (transport.sessionId) {
+        transports.delete(transport.sessionId);
+      }
+    };
+
+    return transport;
+  }
+
+  async function resolveTransport(req: import('node:http').IncomingMessage): Promise<NodeStreamableHTTPServerTransport | undefined> {
+    const sessionId = req.headers['mcp-session-id'];
+    const sessionIdValue = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+
+    if (sessionIdValue) {
+      return transports.get(sessionIdValue);
+    }
+
+    // No session id: only valid for a brand-new POST /mcp initialize call.
+    // Spin up a fresh server + transport pair dedicated to this session.
+    if (req.method === 'POST') {
+      const session = buildServer();
+      const transport = createSessionTransport();
+      await session.connect(transport);
+      return transport;
+    }
+
+    return undefined;
+  }
+
+  const httpServer = createServer((req, res) => {
+    if (req.url === '/health') {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ ok: true, transport: 'http' }));
+      return;
+    }
+
+    // CORS Preflight
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': CORS_ALLOW_HEADERS,
+        'Access-Control-Expose-Headers': 'Mcp-Session-Id',
+        'Access-Control-Max-Age': '86400'
+      });
+      res.end();
+      return;
+    }
+
+    if (req.url?.startsWith('/mcp')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+
+      console.log("================================");
+      console.log("Incoming MCP Request");
+      console.log("Method:", req.method);
+      console.log("Headers:", req.headers);
+      console.log("================================");
+
+      resolveTransport(req)
+        .then(transport => {
+          if (!transport) {
+            res.statusCode = req.method === 'POST' ? 404 : 400;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32001, message: 'Session not found' },
+              id: null
+            }));
+            return;
+          }
+
+          return transport.handleRequest(req, res);
+        })
+        .catch(err => {
+          console.error("MCP ERROR:");
+          console.error(err);
+          if (!res.headersSent) {
+            res.statusCode = 500;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: { code: -32603, message: 'Internal server error' },
+              id: null
+            }));
+          }
+        });
+      return;
+    }
+
+    res.statusCode = 404;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ error: 'Not found' }));
   });
 
-  await server.connect(transport);
-  console.log("MCP Transport Connected");
-
-const httpServer = createServer((req, res) => {
-
-  if (req.url === '/health') {
-    res.statusCode = 200;
-    res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ ok: true, transport: 'http' }));
-    return;
-  }
-
-  // CORS Preflight
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Accept, Mcp-Session-Id',
-      'Access-Control-Max-Age': '86400'
-    });
-    res.end();
-    return;
-  }
-
-  if (req.url?.startsWith('/mcp')) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
-
-    console.log("================================");
-    console.log("Incoming MCP Request");
-    console.log("Method:", req.method);
-    console.log("Headers:", req.headers);
-    console.log("================================");
-
-    void transport.handleRequest(req, res);
-    return;
-  }
-
-  res.statusCode = 404;
-  res.setHeader('content-type', 'application/json');
-  res.end(JSON.stringify({ error: 'Not found' }));
-});
-
   await new Promise<void>(resolve => {
-   httpServer.listen(port, host, () => {
-  console.log(`Listening on ${host}:${port}`);
-  resolve();
-});
+    httpServer.listen(port, host, () => {
+      console.log(`Listening on ${host}:${port}`);
+      resolve();
+    });
   });
 
   process.on('SIGINT', () => {
-    void transport.close();
+    for (const transport of transports.values()) {
+      void transport.close();
+    }
     httpServer.close();
   });
 
