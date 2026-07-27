@@ -4,15 +4,15 @@ An MCP (Model Context Protocol) server that exposes Priya Gautam's professional 
 
 ## Screenshots
 
-### Profile
+### MCP Inspector v1.0.0
 
 ![MCP profile](screenshot/mcp-profile.png)
 
-### Education
+### MCP Inspector v1.0.0
 
 ![MCP education](screenshot/mcp-education.png)
 
-### About Priya
+### About ME
 
 ![About Priya](screenshot/about-priya.png)
 
